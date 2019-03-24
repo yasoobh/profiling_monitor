@@ -3,6 +3,7 @@ package analyzer
 import ("fmt"
 	"database/sql"
 	_ "github.com/go-sql-driver/mysql"
+	"math"
 )
 
 var db *sql.DB
@@ -19,6 +20,16 @@ func Release() {
 	db.Close()
 }
 
+type PeriodAggregateExtended struct {
+	PeriodStartTime uint32
+	PeriodInMinutes uint32
+	MinResponseTime float64
+	MaxResponseTime float64
+	AverageResponseTime uint32
+	TotalCount uint32
+	IsNil bool
+}
+
 type PeriodAggregate struct {
 	MinResponseTime float64
 	MaxResponseTime float64
@@ -33,25 +44,162 @@ type periodAggregateQueryParams struct {
 	Seconds uint32
 }
 
-func Analyze(start_timestamp, end_timestamp uint32) {
-	fmt.Println(getPeriodAggregate(start_timestamp, end_timestamp))
+type segment struct {
+	StartTimestamp uint32
+	EndTimestamp uint32
 }
 
-var stop uint8
+func GetAnalysisForPeriod(start_timestamp, end_timestamp uint32) []PeriodAggregateExtended {
+	var period_aggregates_ext []PeriodAggregateExtended
+	var period_aggregate PeriodAggregate
+	var period_aggregate_ext PeriodAggregateExtended
+
+	// diff := end_timestamp - start_timestamp
+	// fmt.Println("Diff:", diff)
+
+	segments := GetSegmentsForPeriod(start_timestamp, end_timestamp)
+	// fmt.Println(segments)
+
+	for _, segment := range(segments) {
+		period_aggregate = Analyze(segment.StartTimestamp, segment.EndTimestamp)
+
+		period_aggregate_ext.MinResponseTime = period_aggregate.MinResponseTime
+		period_aggregate_ext.MaxResponseTime = period_aggregate.MaxResponseTime
+		period_aggregate_ext.AverageResponseTime = uint32(math.Floor(period_aggregate.TotalResponseTime/float64(period_aggregate.TotalCount)))
+		period_aggregate_ext.TotalCount = period_aggregate.TotalCount
+		period_aggregate_ext.PeriodStartTime = getStartTimestampOfPeriod(segment.StartTimestamp, "ONE_MINUTE")
+		period_aggregate_ext.PeriodInMinutes = (end_timestamp - start_timestamp)/uint32(len(segments))
+
+		if period_aggregate.MaxResponseTime == 0 {
+			period_aggregate_ext.IsNil = true
+		} else {
+			period_aggregate_ext.IsNil = false
+		}
+
+		period_aggregates_ext = append(period_aggregates_ext, period_aggregate_ext)
+	}
+
+	return period_aggregates_ext
+}
+
+func GetSegmentsForPeriod(start_timestamp, end_timestamp uint32) []segment {
+	var segments []segment
+
+	diff := end_timestamp - start_timestamp
+	minutes := diff/60
+
+	var new_start_timestamp, new_end_timestamp uint32
+
+	var i, number_of_segments, seconds uint32
+	var seg segment
+	var period string
+
+	if minutes <= 1800 {
+		switch {
+		case minutes <= 100:
+			period = "ONE_MINUTE"
+		case minutes <= 300:
+			period = "THREE_MINUTES"
+		case minutes <= 900:
+			period = "TEN_MINUTES"
+		case minutes <= 1800:
+			period = "THIRTY_MINUTES"
+		default:
+			period = "NIL_PERIOD"
+		}
+
+		if period != "NIL_PERIOD" {
+			seconds = secondsFromPeriod(period)
+			new_start_timestamp = getEndTimestampOfPeriod(start_timestamp, period)
+			new_end_timestamp = getStartTimestampOfPeriod(end_timestamp, period)
+
+			number_of_segments = (new_end_timestamp - new_start_timestamp)/seconds
+			for i = 0; i<number_of_segments; i++ {
+				seg.StartTimestamp = new_start_timestamp + i*seconds
+				seg.EndTimestamp = new_start_timestamp + (i+1)*seconds
+				segments = append(segments, seg)
+			}
+		}
+	} else {
+		number_of_segments = FindIdealNumberOfSegments(minutes)
+
+		segment_size := diff/number_of_segments
+
+		var i, segment_start_timestamp, segment_end_timestamp uint32
+		for i = 0; i < number_of_segments - 1; i++ {
+			segment_start_timestamp = start_timestamp + i*segment_size
+			segment_end_timestamp = start_timestamp + (i+1)*segment_size
+			// fmt.Println(segment_start_timestamp, segment_end_timestamp)
+			seg.StartTimestamp = segment_start_timestamp
+			seg.EndTimestamp = segment_end_timestamp
+			segments = append(segments, seg)
+		}
+
+		segment_start_timestamp = segment_end_timestamp
+		segment_end_timestamp = end_timestamp
+
+		seg.StartTimestamp = segment_start_timestamp
+		seg.EndTimestamp = segment_end_timestamp
+		segments = append(segments, seg)
+
+		// fmt.Println(segment_start_timestamp, segment_end_timestamp)
+	}
+
+	return segments
+}
+
+func FindIdealNumberOfSegments(minutes uint32) uint32 {
+	var min_number_of_segments uint32 = 30
+	var max_number_of_segments uint32 = 60
+	
+	min_remainder := max_number_of_segments + 1
+
+	var ideal_number_of_segments uint32
+	var remainder uint32
+
+	for number_of_segments := min_number_of_segments; number_of_segments <= max_number_of_segments; number_of_segments++ {
+		// fmt.Println("---------------")
+		// fmt.Println("number of segments:", number_of_segments)
+		remainder = minutes%number_of_segments
+		// fmt.Println("remainder:", remainder)
+		// fmt.Println("min_remainder:", min_remainder)
+		if remainder < min_remainder {
+			min_remainder = remainder
+			ideal_number_of_segments = number_of_segments
+		}
+		// fmt.Println("ideal seg:", ideal_number_of_segments)
+		// fmt.Println("---------------")
+	}
+
+	return ideal_number_of_segments
+}
+
+func Analyze(start_timestamp, end_timestamp uint32) PeriodAggregate {
+	return getPeriodAggregate(start_timestamp, end_timestamp)
+}
+
+// var stop uint8
 
 func getPeriodAggregate(start_timestamp, end_timestamp uint32) PeriodAggregate {
+	// stop++
+	// if stop > 10 {
+	// 	panic("reached 10 calls")
+	// }
 	// diff = end - start
 	// find biggest period which is contained in the range
 	// go result for those big periods
 	// go getPeriodAggregate() for the sub ranges
 
+	// fmt.Println("timestamps: ", start_timestamp, end_timestamp)
 	paqp := GetLongestPeriods(start_timestamp, end_timestamp)
+	// fmt.Println("paqp:", paqp)
 
 	if (paqp.Period == "NIL_PERIOD") {
 		return nilPeriodAggregate()
 	}
 
 	period_aggregate := getPeriodAggregateForTimestampRange(paqp)
+	// fmt.Println("period_aggregate:", period_aggregate)
 
 	if paqp.StartTimestamp != start_timestamp {
 		before_start_aggregate := getPeriodAggregate(start_timestamp, paqp.StartTimestamp)
@@ -177,31 +325,40 @@ func getPeriodAggregateForTimestampRange(paqp periodAggregateQueryParams) Period
 // Given epoch timestamp and a period return the starting timestamp
 // Working with GMT timezone for now
 func getStartTimestampOfPeriod(timestamp uint32, period string) uint32 {
-	var seconds uint32
-	switch period {
-	case "ONE_MINUTE":
-		seconds = 60
-	case "THREE_MINUTES":
-		seconds = 180
-	case "TEN_MINUTES":
-		seconds = 600
-	case "THIRTY_MINUTES":
-		seconds = 1800
-	case "ONE_HOUR":
-		seconds = 3600
-	case "THREE_HOURS":
-		seconds = 10800
-	case "SIX_HOURS":
-		seconds = 21600
-	case "TWELVE_HOURS":
-		seconds = 43200
-	case "ONE_DAY":
-		seconds = 86400
-	default:
-		panic(fmt.Sprintf("Unknown period specified: %s", period))
-	}
+	seconds := secondsFromPeriod(period)
+	// switch period {
+	// case "ONE_MINUTE":
+	// 	seconds = 60
+	// case "THREE_MINUTES":
+	// 	seconds = 180
+	// case "TEN_MINUTES":
+	// 	seconds = 600
+	// case "THIRTY_MINUTES":
+	// 	seconds = 1800
+	// case "ONE_HOUR":
+	// 	seconds = 3600
+	// case "THREE_HOURS":
+	// 	seconds = 10800
+	// case "SIX_HOURS":
+	// 	seconds = 21600
+	// case "TWELVE_HOURS":
+	// 	seconds = 43200
+	// case "ONE_DAY":
+	// 	seconds = 86400
+	// default:
+	// 	panic(fmt.Sprintf("Unknown period specified: %s", period))
+	// }
 
 	return timestamp - timestamp % seconds
+}
+
+func getEndTimestampOfPeriod(timestamp uint32, period string) uint32 {
+	start_timestamp := getStartTimestampOfPeriod(timestamp, period)
+	if start_timestamp == timestamp {
+		return start_timestamp
+	} else {
+		return start_timestamp + secondsFromPeriod(period)
+	}
 }
 
 func periodFromSeconds(seconds uint32) string {
