@@ -52,7 +52,9 @@ func Ingest(timestamp uint32, response_time float64) {
 			pushAggregateToRedis(period, period_aggregate)
 		} else {
 			// push current aggregate to mysql
-			flushCurrentEntryToDb(period, period_aggregate)
+			if period_aggregate["start_timestamp"] != 0 {
+				flushCurrentEntryToDb(period, period_aggregate)
+			}
 
 			// store fresh aggregate in redis
 			new_period_aggregate := map[string]float64 {

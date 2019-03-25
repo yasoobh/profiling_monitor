@@ -30,6 +30,7 @@ func (ds DaySimulator) GetAllResponseTimes() []ResponseTimeRecord {
 
 	for _, minute_timestamp := range(minute_wise_timestamps) {
 		response_times_minute := ds.GetMinuteResponseTimes(minute_timestamp)
+		fmt.Println(response_times_minute)
 		response_times = append(response_times, response_times_minute...)
 	}
 
@@ -57,7 +58,7 @@ func (ds DaySimulator) GetMinuteResponseTimes(minute_timestamp uint16) []Respons
 	var rtr ResponseTimeRecord
 
 	for i := 0; i<curr_throughput; i++ {
-		minute_timestamp_with_seconds := float64(minute_timestamp) + math.Floor(rand.Float64()*60.0)
+		minute_timestamp_with_seconds := float64(minute_timestamp) + rand.Float64()
 		sample_response_time := rts.GetResponseTime(minute_timestamp_with_seconds/60.0)
 
 		rtr = ResponseTimeRecord{
