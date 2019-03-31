@@ -53,6 +53,8 @@ func (ds DaySimulator) GetMinuteResponseTimes(minute_timestamp uint16) []Respons
 
 	curr_throughput := int(math.Floor(ts.GetThroughput(float64(minute_timestamp)/60.0)))
 
+	fmt.Println("Curr throughput", curr_throughput)
+
 	rand.Seed(int64(minute_timestamp))
 
 	var rtr ResponseTimeRecord

@@ -10,8 +10,8 @@ import (
 )
 
 func main() {
-	day_throughput_amplitude := 100.0
-	night_throughput_amplitude := 140.0
+	day_throughput_amplitude := 10000.0
+	night_throughput_amplitude := 14000.0
 
 	morning_response_time_amplitude := 750.0
 	day_response_time_amplitude := 1750.0
@@ -25,7 +25,7 @@ func main() {
 		night_throughput_amplitude,
 	}
 
-	t, _ := time.Parse(time.RFC3339, "2019-03-19T00:00:00Z")
+	t, _ := time.Parse(time.RFC3339, "2019-03-21T00:00:00Z")
 	day_start_timestamp := t.Unix()
 
 	var timestamp uint32

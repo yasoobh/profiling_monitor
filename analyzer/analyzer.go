@@ -4,6 +4,8 @@ import ("fmt"
 	"database/sql"
 	_ "github.com/go-sql-driver/mysql"
 	"math"
+	// "time"
+	"sync"
 )
 
 var db *sql.DB
@@ -51,33 +53,35 @@ type segment struct {
 
 func GetAnalysisForPeriod(start_timestamp, end_timestamp uint32) []PeriodAggregateExtended {
 	var period_aggregates_ext []PeriodAggregateExtended
-	var period_aggregate PeriodAggregate
-	var period_aggregate_ext PeriodAggregateExtended
+	var wg sync.WaitGroup
+
+	// start := time.Now()
 
 	// diff := end_timestamp - start_timestamp
 	// fmt.Println("Diff:", diff)
 
 	segments := GetSegmentsForPeriod(start_timestamp, end_timestamp)
+
 	// fmt.Println(segments)
 
+	periodInMinutes := (end_timestamp - start_timestamp)/uint32(len(segments))
+
+	aggregate_chan := make(chan PeriodAggregateExtended, len(segments))
+
 	for _, segment := range(segments) {
-		period_aggregate = Analyze(segment.StartTimestamp, segment.EndTimestamp)
-
-		period_aggregate_ext.MinResponseTime = period_aggregate.MinResponseTime
-		period_aggregate_ext.MaxResponseTime = period_aggregate.MaxResponseTime
-		period_aggregate_ext.AverageResponseTime = uint32(math.Floor(period_aggregate.TotalResponseTime/float64(period_aggregate.TotalCount)))
-		period_aggregate_ext.TotalCount = period_aggregate.TotalCount
-		period_aggregate_ext.PeriodStartTime = getStartTimestampOfPeriod(segment.StartTimestamp, "ONE_MINUTE")
-		period_aggregate_ext.PeriodInMinutes = (end_timestamp - start_timestamp)/uint32(len(segments))
-
-		if period_aggregate.MaxResponseTime == 0 {
-			period_aggregate_ext.IsNil = true
-		} else {
-			period_aggregate_ext.IsNil = false
-		}
-
-		period_aggregates_ext = append(period_aggregates_ext, period_aggregate_ext)
+		wg.Add(1)
+		go Analyze(segment, periodInMinutes, &wg, aggregate_chan)
 	}
+
+	wg.Wait()
+
+	for i := 0; i < len(segments); i++ {
+		period_aggregates_ext = append(period_aggregates_ext, <-aggregate_chan)
+	}
+
+	// t := time.Now()
+	// elapsed := t.Sub(start)
+	// fmt.Println("Elapsed ms:", elapsed)
 
 	return period_aggregates_ext
 }
@@ -174,17 +178,29 @@ func FindIdealNumberOfSegments(minutes uint32) uint32 {
 	return ideal_number_of_segments
 }
 
-func Analyze(start_timestamp, end_timestamp uint32) PeriodAggregate {
-	return getPeriodAggregate(start_timestamp, end_timestamp)
+func Analyze(seg segment, period uint32, wg *sync.WaitGroup, aggregate_chan chan PeriodAggregateExtended) {
+	defer wg.Done()
+	
+	var period_aggregate_ext PeriodAggregateExtended
+
+	period_aggregate := getPeriodAggregate(seg.StartTimestamp, seg.EndTimestamp)
+
+	period_aggregate_ext.MinResponseTime = period_aggregate.MinResponseTime
+	period_aggregate_ext.MaxResponseTime = period_aggregate.MaxResponseTime
+	period_aggregate_ext.AverageResponseTime = uint32(math.Floor(period_aggregate.TotalResponseTime/float64(period_aggregate.TotalCount)))
+	period_aggregate_ext.TotalCount = period_aggregate.TotalCount
+	period_aggregate_ext.PeriodStartTime = getStartTimestampOfPeriod(seg.StartTimestamp, "ONE_MINUTE")
+	period_aggregate_ext.PeriodInMinutes = period
+
+	if period_aggregate.MaxResponseTime == 0 {
+		period_aggregate_ext.IsNil = true
+	} else {
+		period_aggregate_ext.IsNil = false
+	}
+	aggregate_chan <- period_aggregate_ext
 }
 
-// var stop uint8
-
 func getPeriodAggregate(start_timestamp, end_timestamp uint32) PeriodAggregate {
-	// stop++
-	// if stop > 10 {
-	// 	panic("reached 10 calls")
-	// }
 	// diff = end - start
 	// find biggest period which is contained in the range
 	// go result for those big periods
@@ -326,29 +342,6 @@ func getPeriodAggregateForTimestampRange(paqp periodAggregateQueryParams) Period
 // Working with GMT timezone for now
 func getStartTimestampOfPeriod(timestamp uint32, period string) uint32 {
 	seconds := secondsFromPeriod(period)
-	// switch period {
-	// case "ONE_MINUTE":
-	// 	seconds = 60
-	// case "THREE_MINUTES":
-	// 	seconds = 180
-	// case "TEN_MINUTES":
-	// 	seconds = 600
-	// case "THIRTY_MINUTES":
-	// 	seconds = 1800
-	// case "ONE_HOUR":
-	// 	seconds = 3600
-	// case "THREE_HOURS":
-	// 	seconds = 10800
-	// case "SIX_HOURS":
-	// 	seconds = 21600
-	// case "TWELVE_HOURS":
-	// 	seconds = 43200
-	// case "ONE_DAY":
-	// 	seconds = 86400
-	// default:
-	// 	panic(fmt.Sprintf("Unknown period specified: %s", period))
-	// }
-
 	return timestamp - timestamp % seconds
 }
 

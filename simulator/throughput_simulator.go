@@ -34,6 +34,18 @@ func (ts ThroughputSimulator) getSecondCurveThroughput(time float64) float64 {
 	return dist.Prob(time)*ts.NightThroughputAmplitude
 }
 
+// 0 <= time < 24
+func (ts ThroughputSimulator) getThreeCurveThroughput(time float64) float64 {
+	sqrt_seven := math.Sqrt(7)
+
+	dist := distuv.Normal{
+	    Mu:    -3,
+	    Sigma: sqrt_seven,
+	}
+
+	return dist.Prob(time)*ts.NightThroughputAmplitude
+}
+
 func (ts ThroughputSimulator) GetThroughput(time float64) float64 {
-	return ts.getFirstCurveThroughput(time) + ts.getSecondCurveThroughput(time)
+	return ts.getFirstCurveThroughput(time) + ts.getSecondCurveThroughput(time) + ts.getThreeCurveThroughput(time)
 }
